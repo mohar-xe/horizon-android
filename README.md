@@ -36,6 +36,8 @@ This repository is the Android port of Horizon: the same Rust game, built for An
 3. Press Install. The launcher prepares the resources once, on the phone, with a Java runtime it carries. It takes a few minutes, so keep the app on screen while it runs.
 4. Press Play.
 
+To play without a Microsoft account, open **Settings > Local account**, add a name, and Play as it. Local accounts play single player, LAN and offline-mode servers; online-mode servers still need a signed-in Microsoft account. Minecraft's files still have to be on the phone: download them with an account that owns the game, or copy a Minecraft folder over USB.
+
 The touch controls work like Zalith Launcher 2's and read and write its layouts, so a layout exported there imports here. The H ball over the game opens the game menu, with the layout editor, gestures, the gyroscope and the keyboard. Gamepads work too. New releases show up in the launcher as Update.
 
 How to build it and how the port works: [docs/android.md](docs/android.md).

@@ -25,6 +25,19 @@ and Android 10 or newer.
 
 Nothing of Mojang's is in the APK.
 
+## Accounts
+
+Play with the Microsoft account that owns Minecraft: Java Edition, or with a **local account**:
+Settings > Local account, add a name (3 to 16 letters, digits or `_`), and Play as it. A local
+account needs no Microsoft account and no ownership check: it plays single player, LAN and
+offline-mode servers, and the game knows it by that name. Online-mode servers still need a
+signed-in Microsoft account.
+
+A local account is not a way to get the game: Minecraft 26.3's files still have to be on the
+phone, downloaded with a signed-in account or copied into
+`Android/data/com.lukagejak.horizon/files/minecraft` over USB. Local accounts are kept in
+`accounts.json` beside the launcher's other files; Forget removes one.
+
 ## Controls
 
 Touch works as in Zalith Launcher 2, with its control layouts

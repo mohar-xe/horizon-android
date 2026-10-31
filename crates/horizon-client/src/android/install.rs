@@ -339,13 +339,20 @@ pub fn install(app: &AndroidApp, paths: &Paths, log: &dyn Fn(String)) -> Result<
     Ok(())
 }
 
-/// The game's arguments for Play: the resources and the signed-in account.
+/// The game's arguments for Play: the resources, then the account that plays. A local account
+/// is the game's `--name`; a Microsoft account brings its session file.
 pub fn game_args(paths: &Paths) -> Result<Vec<String>, String> {
     let mut args = vec![
         "--resources".to_owned(),
         paths.resources().display().to_string(),
     ];
-    if account::client_id().is_some() {
+    let accounts = account::Accounts::load();
+    if let Some(name) = accounts.name_arg() {
+        args.push("--name".into());
+        args.push(name.to_owned());
+        return Ok(args);
+    }
+    if accounts.selected().is_some() && account::client_id().is_some() {
         let (session, _offline) =
             account::session_for_game(&paths.home, false).map_err(|refused| {
                 format!("{refused} Sign in with your Microsoft account in the launcher.")

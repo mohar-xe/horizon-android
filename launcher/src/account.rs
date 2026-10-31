@@ -975,6 +975,17 @@ impl Accounts {
         Ok(())
     }
 
+    /// Plays as a local name, with no Microsoft account: the Android launcher's local accounts.
+    /// The name is kept with the other offline names, and no account that owns the game is
+    /// needed. Local names play single player, LAN and offline-mode servers; online-mode servers
+    /// still need a signed-in account.
+    pub fn play_as_local(&mut self, name: &str) -> Result<(), String> {
+        let name = self.add_offline(name)?;
+        self.selected = None;
+        self.offline_selected = Some(name);
+        Ok(())
+    }
+
     /// Keeps an offline name (once, in any case); returns it as kept.
     fn add_offline(&mut self, name: &str) -> Result<String, String> {
         let name = name.trim();

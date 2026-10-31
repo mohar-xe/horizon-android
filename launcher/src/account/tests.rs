@@ -453,6 +453,26 @@ fn the_developer_option_off_is_the_owner_gate() {
 }
 
 #[test]
+fn local_accounts_play_without_an_owner() {
+    let mut accounts = Accounts::default();
+    accounts.play_as_local("Builder_1").unwrap();
+    assert_eq!(accounts.player(), Player::Offline("Builder_1".into()));
+    assert_eq!(accounts.name_arg(), Some("Builder_1"));
+    assert_eq!(accounts.offline, ["Builder_1"]);
+    // The name is checked as the offline names are.
+    assert!(accounts.play_as_local("no spaces").is_err());
+    assert!(accounts.play_as_local("ab").is_err());
+    // A local account can play beside a signed-in one, which stays in the list.
+    let store = MemoryStore::default();
+    let mut accounts = signed_in(&store, &secrets("mc-token", true));
+    accounts.play_as_local("Builder_2").unwrap();
+    assert_eq!(accounts.player(), Player::Offline("Builder_2".into()));
+    assert_eq!(accounts.name_arg(), Some("Builder_2"));
+    assert_eq!(accounts.accounts.len(), 1);
+    assert_eq!(accounts.selected, None);
+}
+
+#[test]
 fn the_developer_option_plays_offline_names_without_an_owner() {
     let store = MemoryStore::default();
     let mut accounts = Accounts::default();

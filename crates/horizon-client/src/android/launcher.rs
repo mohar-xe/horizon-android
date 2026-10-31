@@ -22,8 +22,15 @@ enum Page {
     Settings,
 }
 
-/// A text field the soft keyboard types into: the client ID.
+#[derive(Clone, Copy, PartialEq)]
+enum EditTarget {
+    ClientId,
+    LocalName,
+}
+
+/// A text field the soft keyboard types into: the client ID, or a local account's name.
 struct Editing {
+    target: EditTarget,
     text: String,
 }
 
@@ -217,10 +224,20 @@ impl Launcher {
                     editing.text.pop();
                 }
                 jni::Typed::Enter => {
-                    let id = editing.text.trim().to_owned();
-                    self.save_client_id(&id);
-                    self.editing = None;
-                    jni::show_keyboard(false);
+                    let (target, text) = (editing.target, editing.text.trim().to_owned());
+                    match target {
+                        EditTarget::ClientId => {
+                            self.save_client_id(&text);
+                            self.editing = None;
+                            jni::show_keyboard(false);
+                        }
+                        EditTarget::LocalName => {
+                            if self.save_local_name(&text) {
+                                self.editing = None;
+                                jni::show_keyboard(false);
+                            }
+                        }
+                    }
                     return;
                 }
             }
@@ -259,6 +276,30 @@ impl Launcher {
         };
         if let Err(e) = result {
             self.error = Some(format!("The client ID could not be saved: {e}"));
+        }
+    }
+
+    /// Keeps a local account and plays as it: no Microsoft account, no owner check. The game
+    /// still needs the Minecraft files on the phone, prepared as for any account.
+    fn save_local_name(&mut self, name: &str) -> bool {
+        let name = name.trim();
+        if !account::valid_offline_name(name) {
+            self.error = Some(format!(
+                "{name}: a local name is 3 to 16 letters, digits or _"
+            ));
+            return false;
+        }
+        let mut accounts = account::Accounts::load();
+        match accounts.play_as_local(name).and_then(|_| accounts.save()) {
+            Ok(()) => {
+                self.accounts = accounts;
+                self.error = None;
+                true
+            }
+            Err(e) => {
+                self.error = Some(e);
+                false
+            }
         }
     }
 
@@ -456,18 +497,48 @@ impl Launcher {
         }
         // 01 who plays.
         let row = Rect::new(r.x, y, r.w, ROW);
-        let (name, detail) = match self.signed_in() {
-            Some(a) => (format!("Playing as {}", a.name), "Your Microsoft account. Online-mode servers know you by it.".to_owned()),
-            None => (
+        let (name, detail) = match (self.signed_in(), self.accounts.offline_selected.as_deref()) {
+            (Some(a), _) => (
+                format!("Playing as {}", a.name),
+                "Your Microsoft account. Online-mode servers know you by it.".to_owned(),
+            ),
+            (None, Some(local)) => (
+                format!("Playing as {local}"),
+                "Local account. Single player, LAN and offline-mode servers know you by it."
+                    .to_owned(),
+            ),
+            (None, None) => (
                 "Not signed in".to_owned(),
-                "Sign in with the Microsoft account that owns Minecraft: Java Edition. Horizon downloads the game files with it.".to_owned(),
+                "Sign in with the Microsoft account that owns Minecraft: Java Edition, or add a \
+                 local account in Settings."
+                    .to_owned(),
             ),
         };
-        ui.row(row, 1, &name, &detail, 110.0);
-        if self.signed_in().is_none()
-            && ui.row_button(row, "Sign in", false, self.sign_in.is_none())
-        {
-            self.start_sign_in();
+        ui.row(row, 1, &name, &detail, 200.0);
+        if self.signed_in().is_none() {
+            let sign_in_w = ui.button_width("Sign in");
+            let local_w = ui.button_width("Local");
+            let at = row.y + (row.h - CONTROL) / 2.0;
+            let local = Rect::new(
+                row.right() - sign_in_w - 8.0 - local_w,
+                at,
+                local_w,
+                CONTROL,
+            );
+            let sign_in = Rect::new(row.right() - sign_in_w, at, sign_in_w, CONTROL);
+            if ui.button(local, "Local", false, true) {
+                self.page = Page::Settings;
+                self.scroll = 0.0;
+                self.editing = Some(Editing {
+                    target: EditTarget::LocalName,
+                    text: self.accounts.offline_selected.clone().unwrap_or_default(),
+                });
+                jni::take_typed();
+                jni::show_keyboard(true);
+            }
+            if ui.button(sign_in, "Sign in", false, self.sign_in.is_none()) {
+                self.start_sign_in();
+            }
         }
         y += ROW;
         // 02 the game files.
@@ -677,22 +748,110 @@ impl Launcher {
                 }
             }
             None => {
-                ui.row(
-                    row,
-                    i,
-                    "Microsoft account",
-                    "Not signed in: the game plays offline.",
-                    110.0,
-                );
+                let detail = match self.accounts.offline_selected.as_deref() {
+                    Some(name) => format!("Not signed in. The local account {name} plays."),
+                    None => "Not signed in: the game plays offline.".to_owned(),
+                };
+                ui.row(row, i, "Microsoft account", &detail, 110.0);
                 if ui.row_button(row, "Sign in", false, self.sign_in.is_none()) {
                     self.start_sign_in();
                 }
             }
         }
+        // Local accounts: a name, no Microsoft account, no owner check.
+        let (row, i) = next(&mut y);
+        let local_editing = self
+            .editing
+            .as_ref()
+            .is_some_and(|e| e.target == EditTarget::LocalName);
+        let detail = if local_editing {
+            format!(
+                "{}|",
+                self.editing.as_ref().map(|e| e.text.as_str()).unwrap_or("")
+            )
+        } else {
+            match self.accounts.offline_selected.as_deref() {
+                Some(name) => format!(
+                    "Playing as {name}. Single player, LAN and offline-mode servers know you by it."
+                ),
+                None => "None selected. Add a name to play without a Microsoft account.".to_owned(),
+            }
+        };
+        ui.row(row, i, "Local account", &detail, 90.0);
+        if local_editing {
+            if ui.row_button(row, "Save", true, true) {
+                let text = self
+                    .editing
+                    .as_ref()
+                    .map(|e| e.text.clone())
+                    .unwrap_or_default();
+                if self.save_local_name(text.trim()) {
+                    self.editing = None;
+                    jni::show_keyboard(false);
+                }
+            }
+        } else if ui.row_button(row, "Add", false, true) {
+            self.editing = Some(Editing {
+                target: EditTarget::LocalName,
+                text: self.accounts.offline_selected.clone().unwrap_or_default(),
+            });
+            jni::take_typed();
+            jni::show_keyboard(true);
+        }
+        // Every local name, to play as it or forget it.
+        for name in self.accounts.offline.clone() {
+            let (row, i) = next(&mut y);
+            let playing = self
+                .accounts
+                .offline_selected
+                .as_ref()
+                .is_some_and(|n| n.eq_ignore_ascii_case(&name));
+            let detail = if playing {
+                "Playing as this local account."
+            } else {
+                "Local account."
+            };
+            let forget_w = ui.button_width("Forget");
+            let play_w = ui.button_width(if playing { "Playing" } else { "Play as" });
+            let area = ui.row(row, i, &name, detail, forget_w + 8.0 + play_w);
+            let at = row.y + (row.h - CONTROL) / 2.0;
+            let play = Rect::new(area.right() - forget_w - 8.0 - play_w, at, play_w, CONTROL);
+            let forget = Rect::new(area.right() - forget_w, at, forget_w, CONTROL);
+            if ui.button(
+                play,
+                if playing { "Playing" } else { "Play as" },
+                false,
+                !playing,
+            ) {
+                let mut accounts = account::Accounts::load();
+                if let Err(e) = accounts.play_as_local(&name).and_then(|_| accounts.save()) {
+                    self.error = Some(e);
+                }
+                self.accounts = account::Accounts::load();
+            }
+            if ui.button(forget, "Forget", false, true) {
+                let mut accounts = account::Accounts::load();
+                if let Err(e) = accounts
+                    .remove_offline(&name, &crate::skins::dir())
+                    .and_then(|_| accounts.save())
+                {
+                    self.error = Some(e);
+                }
+                self.accounts = account::Accounts::load();
+            }
+        }
         // The Azure app the sign-in uses.
         let (row, i) = next(&mut y);
-        let editing = self.editing.is_some();
-        let detail = match (&self.editing, account::client_id()) {
+        let client_editing = self
+            .editing
+            .as_ref()
+            .is_some_and(|e| e.target == EditTarget::ClientId);
+        let detail = match (
+            self.editing
+                .as_ref()
+                .filter(|e| e.target == EditTarget::ClientId),
+            account::client_id(),
+        ) {
             (Some(e), _) => format!("{}|", e.text),
             (None, Some(id)) => id,
             (None, None) => {
@@ -700,7 +859,7 @@ impl Launcher {
             }
         };
         ui.row(row, i, "Azure client ID", &detail, 90.0);
-        if editing {
+        if client_editing {
             if ui.row_button(row, "Save", true, true) {
                 let id = self.editing.take().map(|e| e.text).unwrap_or_default();
                 self.save_client_id(id.trim());
@@ -708,6 +867,7 @@ impl Launcher {
             }
         } else if ui.row_button(row, "Edit", false, true) {
             self.editing = Some(Editing {
+                target: EditTarget::ClientId,
                 text: account::client_id().unwrap_or_default(),
             });
             jni::take_typed();
