@@ -70,6 +70,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends clang lld llvm
 
+      - name: Add the Gradle wrapper jar
+        # .gitignore keeps *.jar out of the repository; the wrapper properties
+        # name Gradle 8.14.5, so take that release's wrapper jar.
+        run: |
+          curl -fsSL -o android/gradle/wrapper/gradle-wrapper.jar \
+            https://raw.githubusercontent.com/gradle/gradle/v8.14.5/gradle/wrapper/gradle-wrapper.jar
+          test -s android/gradle/wrapper/gradle-wrapper.jar
+
       - name: Build the APK
         env:
           HORIZON_ANDROID_PROFILE: android
