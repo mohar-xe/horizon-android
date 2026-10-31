@@ -1,0 +1,108 @@
+name: android apk
+
+# Builds the Android APK in GitHub Actions, for forks that do not have an
+# Android SDK/NDK on their own machine. Manual only: the game is large and a
+# release-profile build takes a while.
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag to publish the APK under
+        type: string
+        default: local-accounts
+      publish:
+        description: Create or update the GitHub release
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Free disk space for Rust and the Android tools
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: false
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: false
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install the Android platform, build tools and NDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --install \
+            "platforms;android-37" \
+            "build-tools;37.0.0" \
+            "ndk;27.2.12479018"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls "$ANDROID_HOME/ndk"
+
+      - name: Install Rust's Android target and the host linker tools
+        run: |
+          rustup toolchain install stable --profile minimal --target aarch64-linux-android
+          rustup default stable
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang lld llvm
+
+      - name: Build the APK
+        env:
+          HORIZON_ANDROID_PROFILE: android
+          HORIZON_ANDROID_JOBS: '4'
+        run: |
+          android/build.sh
+          ls -lh android/build/horizon-*-android-arm64.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: horizon-local-accounts-apk
+          path: android/build/horizon-*-android-arm64.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish the release
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag }}
+        run: |
+          apk=$(ls android/build/horizon-*-android-arm64.apk | head -n 1)
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$apk" --clobber
+          else
+            gh release create "$TAG" "$apk" \
+              --target "$GITHUB_SHA" \
+              --title "Horizon for Android - local accounts" \
+              --notes "Built from \`${GITHUB_REPOSITORY}\` at \`${GITHUB_SHA}\`.
+
+          Adds local accounts: Settings > Local account, add a name, and Play as it.
+          They play single player, LAN and offline-mode servers without a Microsoft
+          account. Online-mode servers still need a signed-in account, and
+          Minecraft's files still have to be on the phone.
+
+          This is a debug-signed test build. It cannot be installed over an APK
+          signed with another key: uninstall the old app first, which deletes its
+          data, so back up worlds you want to keep."
+          fi
